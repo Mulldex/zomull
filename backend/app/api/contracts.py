@@ -1,0 +1,388 @@
+import os
+import uuid
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.security import get_current_user, require_role
+from app.core.config import settings
+from app.models.models import (
+    Contract, ContractStatus, User, AuditLog,
+    UserRole, Project
+)
+from app.schemas.schemas import ContractCreate, ContractUpdate, ContractApprovalUpdate, ContractOut
+
+router = APIRouter()
+
+
+def _assign_approvers(db: Session, contract: Contract, project_id: Optional[int]):
+    """Priradí schvaľovateľov k zmluve."""
+    # Stavbyvedúci – preferenčne z projektu
+    if project_id:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project and project.foremen:
+            contract.foreman_id = project.foremen[0].id
+    if not contract.foreman_id:
+        foreman = db.query(User).filter(
+            User.role == UserRole.foreman, User.is_active == True
+        ).first()
+        if foreman:
+            contract.foreman_id = foreman.id
+
+    # Ekonóm
+    ekonom = db.query(User).filter(
+        User.role == UserRole.ekonom, User.is_active == True
+    ).first()
+    if ekonom:
+        contract.ekonom_id = ekonom.id
+
+    # Riaditeľ
+    director = db.query(User).filter(
+        User.role == UserRole.director, User.is_active == True
+    ).first()
+    if director:
+        contract.director_id = director.id
+
+
+def _log(db: Session, contract_id: int, user_id: Optional[int], action: str, detail: str = None):
+    db.add(AuditLog(contract_id=contract_id, user_id=user_id, action=action, detail=detail))
+    db.commit()
+
+
+def _check_all_approved(db: Session, contract: Contract):
+    """Skontroluje, či všetci schválili a aktualizuje stav."""
+    if contract.foreman_approved and contract.ekonom_approved and contract.director_approved:
+        contract.status = ContractStatus.approved
+        _log(db, contract.id, None, "schválená", "Všetci schvaľovatelia schválili")
+
+
+def _generate_contract_number(db: Session, project_id: Optional[int]) -> str:
+    """
+    Generuje číslo zmluvy vo formáte:
+      - s projektom:    ZML-{kód_projektu}-{NNNN}   napr. ZML-P-2026-01-0001
+      - bez projektu:   ZML-{rok}-{NNNN}            napr. ZML-2026-0011
+    Poradové číslo sa počíta v rámci projektu (alebo rok-globálne ak nie je projekt).
+    """
+    year = datetime.utcnow().year
+    if project_id:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project:
+            prefix = f"ZML-{project.code}-"
+            count = (
+                db.query(Contract)
+                .filter(Contract.project_id == project_id)
+                .count()
+            )
+            return f"{prefix}{count + 1:04d}"
+    prefix = f"ZML-{year}-"
+    count = (
+        db.query(Contract)
+        .filter(Contract.project_id.is_(None), Contract.contract_number.like(f"{prefix}%"))
+        .count()
+    )
+    return f"{prefix}{count + 1:04d}"
+
+
+# ── Zoznam zmlúv ─────────────────────────────────────────────────────────────
+
+@router.get("/", response_model=List[ContractOut])
+def list_contracts(
+    status: Optional[str] = Query(None),
+    project_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = db.query(Contract)
+
+    if current_user.role == UserRole.foreman:
+        q = q.filter(Contract.foreman_id == current_user.id)
+    elif current_user.role == UserRole.ekonom:
+        q = q.filter(Contract.ekonom_id == current_user.id)
+    elif current_user.role == UserRole.director:
+        q = q.filter(Contract.director_id == current_user.id)
+
+    if status:
+        statuses = [s.strip() for s in status.split(',')]
+        q = q.filter(Contract.status.in_(statuses))
+    if project_id:
+        q = q.filter(Contract.project_id == project_id)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            Contract.contract_number.ilike(like) |
+            Contract.counterparty.ilike(like) |
+            Contract.subject.ilike(like)
+        )
+
+    return q.order_by(Contract.created_at.desc()).all()
+
+
+@router.get("/{contract_id}", response_model=ContractOut)
+def get_contract(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    return contract
+
+
+# ── Vytvorenie zmluvy (metadata) ──────────────────────────────────────────────
+
+@router.post("/", response_model=ContractOut)
+def create_contract(
+    payload: ContractCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+):
+    contract_number = payload.contract_number or _generate_contract_number(db, payload.project_id)
+    if db.query(Contract).filter(Contract.contract_number == contract_number).first():
+        contract_number = _generate_contract_number(db, payload.project_id)
+
+    contract = Contract(
+        contract_number=contract_number,
+        contract_type=payload.contract_type,
+        counterparty=payload.counterparty,
+        subject=payload.subject,
+        value=payload.value,
+        currency=payload.currency,
+        sign_date=payload.sign_date,
+        valid_from=payload.valid_from,
+        valid_to=payload.valid_to,
+        supplier_id=payload.supplier_id,
+        project_id=payload.project_id,
+        notes=payload.notes,
+        status=ContractStatus.pending_approval,
+        created_by=current_user.id,
+    )
+    _assign_approvers(db, contract, payload.project_id)
+    db.add(contract)
+    db.commit()
+    db.refresh(contract)
+    _log(db, contract.id, current_user.id, "vytvorená",
+         f"Zmluva vytvorená: {contract.contract_number}")
+    return contract
+
+
+# ── Vytvorenie zmluvy s PDF ───────────────────────────────────────────────────
+
+@router.post("/upload", response_model=ContractOut)
+async def create_contract_with_pdf(
+    contract_number: Optional[str] = Form(None),
+    contract_type: str = Form(...),
+    counterparty: str = Form(...),
+    subject: str = Form(...),
+    value: Optional[float] = Form(None),
+    currency: str = Form("EUR"),
+    sign_date: Optional[str] = Form(None),
+    valid_from: Optional[str] = Form(None),
+    valid_to: Optional[str] = Form(None),
+    supplier_id: Optional[int] = Form(None),
+    project_id: Optional[int] = Form(None),
+    notes: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+):
+    if not contract_number:
+        contract_number = _generate_contract_number(db, project_id)
+    if db.query(Contract).filter(Contract.contract_number == contract_number).first():
+        contract_number = _generate_contract_number(db, project_id)
+
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf"]:
+        raise HTTPException(400, "Povolené sú len PDF súbory")
+    filename = f"contract_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(settings.UPLOAD_DIR, filename)
+    content = await file.read()
+    if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(400, f"Súbor je príliš veľký (max {settings.MAX_FILE_SIZE_MB} MB)")
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    def parse_dt(s):
+        return datetime.fromisoformat(s) if s else None
+
+    contract = Contract(
+        contract_number=contract_number,
+        contract_type=contract_type,
+        counterparty=counterparty,
+        subject=subject,
+        value=value,
+        currency=currency,
+        sign_date=parse_dt(sign_date),
+        valid_from=parse_dt(valid_from),
+        valid_to=parse_dt(valid_to),
+        supplier_id=supplier_id,
+        project_id=project_id,
+        notes=notes,
+        pdf_path=filepath,
+        pdf_filename=file.filename,
+        status=ContractStatus.pending_approval,
+        created_by=current_user.id,
+    )
+    _assign_approvers(db, contract, project_id)
+    db.add(contract)
+    db.commit()
+    db.refresh(contract)
+    _log(db, contract.id, current_user.id, "vytvorená s PDF",
+         f"Zmluva s PDF: {contract.contract_number}")
+    return contract
+
+
+@router.post("/{contract_id}/pdf", response_model=ContractOut)
+async def attach_pdf(
+    contract_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf"]:
+        raise HTTPException(400, "Povolené sú len PDF súbory")
+    filename = f"contract_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(settings.UPLOAD_DIR, filename)
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    if contract.pdf_path and os.path.exists(contract.pdf_path):
+        os.remove(contract.pdf_path)
+    contract.pdf_path = filepath
+    contract.pdf_filename = file.filename
+    db.commit()
+    db.refresh(contract)
+    _log(db, contract.id, current_user.id, "PDF priložené", file.filename)
+    return contract
+
+
+@router.get("/{contract_id}/pdf")
+def get_contract_pdf(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract or not contract.pdf_path:
+        raise HTTPException(404, "PDF nenájdené")
+    if not os.path.exists(contract.pdf_path):
+        raise HTTPException(404, "Súbor neexistuje na disku")
+    return FileResponse(contract.pdf_path, media_type="application/pdf",
+                        filename=contract.pdf_filename or "zmluva.pdf")
+
+
+# ── Paralelné schvaľovanie zmlúv ─────────────────────────────────────────────
+
+@router.patch("/{contract_id}/approve", response_model=ContractOut)
+def approve_contract(
+    contract_id: int,
+    payload: ContractApprovalUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    if contract.status not in [ContractStatus.pending_approval]:
+        if current_user.role != UserRole.admin:
+            raise HTTPException(400, "Zmluva nie je v stave čakania na schválenie")
+
+    now = datetime.utcnow()
+
+    if not payload.approved:
+        # Zamietnutie – okamžite celá zmluva zamietnutá
+        contract.status = ContractStatus.rejected
+        contract.rejection_reason = payload.rejection_reason
+        _log(db, contract.id, current_user.id, "zamietnutá",
+             f"{current_user.role.value} zamietol: {payload.rejection_reason}")
+        db.commit()
+        db.refresh(contract)
+        return contract
+
+    # Schválenie podľa roly
+    if current_user.role == UserRole.foreman and contract.foreman_id == current_user.id:
+        if not contract.foreman_approved:
+            contract.foreman_approved = True
+            contract.foreman_approved_at = now
+            _log(db, contract.id, current_user.id, "schválená stavbyvedúcim", None)
+
+    elif current_user.role == UserRole.ekonom and contract.ekonom_id == current_user.id:
+        if not contract.ekonom_approved:
+            contract.ekonom_approved = True
+            contract.ekonom_approved_at = now
+            _log(db, contract.id, current_user.id, "schválená ekonómom", None)
+
+    elif current_user.role == UserRole.director and contract.director_id == current_user.id:
+        if not contract.director_approved:
+            contract.director_approved = True
+            contract.director_approved_at = now
+            _log(db, contract.id, current_user.id, "schválená riaditeľom", None)
+
+    elif current_user.role == UserRole.admin:
+        contract.foreman_approved = True
+        contract.ekonom_approved = True
+        contract.director_approved = True
+        contract.foreman_approved_at = now
+        contract.ekonom_approved_at = now
+        contract.director_approved_at = now
+        _log(db, contract.id, current_user.id, "schválená adminom", None)
+
+    else:
+        raise HTTPException(403, "Nemáte oprávnenie schváliť túto zmluvu")
+
+    db.flush()
+    _check_all_approved(db, contract)
+    db.commit()
+    db.refresh(contract)
+    return contract
+
+
+# ── Úprava metadát ────────────────────────────────────────────────────────────
+
+@router.patch("/{contract_id}", response_model=ContractOut)
+def update_contract(
+    contract_id: int,
+    payload: ContractUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(contract, field, value)
+    db.commit()
+    db.refresh(contract)
+    _log(db, contract.id, current_user.id, "upravená", None)
+    return contract
+
+
+# ── Mazanie ───────────────────────────────────────────────────────────────────
+
+@router.delete("/{contract_id}")
+def delete_contract(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    if contract.pdf_path and os.path.exists(contract.pdf_path):
+        os.remove(contract.pdf_path)
+    db.delete(contract)
+    db.commit()
+    return {"message": "Zmluva vymazaná"}

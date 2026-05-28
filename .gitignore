@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets / env
+.env
+.env.local
+.env.*.local
+*.local
+
+# Backend uploads (user data — bezpečnosť + veľkosť)
+backend/uploads/
+
+# Docker volume data (ak by sa generovala lokálne)
+postgres-data/
+
+# PDF výstupy z generate_mockup
+ZOMULL_vzor_objednavky*.pdf
+generate_mockup.py

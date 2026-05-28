@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zomull
+      POSTGRES_PASSWORD: vase_heslo
+      POSTGRES_DB: zomull
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Port nie je vystavený na host (zbytočné a koliduje s inými Postgres inštaláciami).
+    # Backend komunikuje s DB cez Docker sieť ako db:5432.
+    # Ak by si chcel pristupovať z hosta (napr. pgAdmin), odkomentuj a zmeň na nepoužitý port:
+    # ports:
+    #   - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zomull"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://zomull:vase_heslo@db:5432/zomull
+      - SECRET_KEY=zomull-tajny-kluc-zmente-v-produkcii
+      - ACCESS_TOKEN_EXPIRE_MINUTES=480
+      - ALLOWED_ORIGINS=["http://localhost:3001","http://localhost:5173"]
+      - UPLOAD_DIR=uploads
+      - MAX_FILE_SIZE_MB=20
+      - DEFAULT_FOREMAN_LIMIT=500.0
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    volumes:
+      - uploads_data:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - BACKEND_URL=http://backend:8000
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  uploads_data:
