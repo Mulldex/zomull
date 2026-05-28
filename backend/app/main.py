@@ -65,6 +65,42 @@ def _run_migrations():
 
 _run_migrations()
 
+
+def _seed_default_admin():
+    """Vytvorí default admin účet pri prvom štarte (iba ak ešte žiadny admin neexistuje)."""
+    try:
+        from app.core.database import SessionLocal
+        from app.core.security import hash_password
+        from app.models.models import User, UserRole
+
+        email = os.getenv("ADMIN_EMAIL", "admin@zomull.sk")
+        password = os.getenv("ADMIN_PASSWORD", "admin123")
+        full_name = os.getenv("ADMIN_NAME", "Administrátor")
+
+        db = SessionLocal()
+        try:
+            existing_admin = db.query(User).filter(User.role == UserRole.admin).first()
+            if existing_admin:
+                logger.info(f"[seed_admin] Admin už existuje: {existing_admin.email}")
+                return
+            user = User(
+                full_name=full_name,
+                email=email,
+                hashed_password=hash_password(password),
+                role=UserRole.admin,
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            logger.info(f"[seed_admin] Default admin vytvorený: {email} (heslo: {password})")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"[seed_admin] Chyba pri seedovaní admina: {e}")
+
+
+_seed_default_admin()
+
 app = FastAPI(
     title="ZOMULL API",
     description="Systém správy objednávok a zmlúv",
