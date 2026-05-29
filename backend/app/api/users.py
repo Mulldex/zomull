@@ -80,19 +80,40 @@ def hard_delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    from app.models.models import OrderAttachment, ContractAttachment
+    from sqlalchemy import text as sql_text
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "Používateľ nenájdený")
     if user.id == current_user.id:
         raise HTTPException(400, "Nemôžete vymazať samého seba")
 
-    # Odopni referencie
+    # Skontroluj, či má používateľ vytvorené OBJ alebo zmluvy (created_by je nullable=False)
+    created_orders = db.query(Order).filter(Order.created_by == user_id).count()
+    created_contracts = db.query(Contract).filter(Contract.created_by == user_id).count()
+    if created_orders > 0 or created_contracts > 0:
+        raise HTTPException(
+            400,
+            f"Nemožno vymazať: používateľ vytvoril {created_orders} OBJ a {created_contracts} zmlúv. "
+            f"Najskôr zmaž/preraď tieto záznamy alebo používateľa iba deaktivuj."
+        )
+
+    # Odopni nullable referencie
     db.query(Order).filter(Order.foreman_id == user_id).update({"foreman_id": None})
     db.query(Order).filter(Order.director_id == user_id).update({"director_id": None})
     db.query(Contract).filter(Contract.foreman_id == user_id).update({"foreman_id": None})
     db.query(Contract).filter(Contract.ekonom_id == user_id).update({"ekonom_id": None})
     db.query(Contract).filter(Contract.director_id == user_id).update({"director_id": None})
+    db.query(Contract).filter(Contract.rejected_by_id == user_id).update({"rejected_by_id": None})
     db.query(AuditLog).filter(AuditLog.user_id == user_id).update({"user_id": None})
+
+    # Prílohy — uploaded_by je nullable
+    db.query(OrderAttachment).filter(OrderAttachment.uploaded_by == user_id).update({"uploaded_by": None})
+    db.query(ContractAttachment).filter(ContractAttachment.uploaded_by == user_id).update({"uploaded_by": None})
+
+    # M:N project_foreman — odstráň všetky priradenia
+    db.execute(sql_text("DELETE FROM project_foreman WHERE user_id = :uid"), {"uid": user_id})
 
     db.delete(user)
     db.commit()
