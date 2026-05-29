@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { CheckCircle, XCircle, FileText, ArrowLeft, Trash2, Upload, Check, X, Paperclip, Download, Wand2 } from 'lucide-react'
+import { CheckCircle, XCircle, FileText, ArrowLeft, Trash2, Upload, Check, X, Paperclip, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { contractService } from '../services/documentService'
 import type { Contract } from '../types'
@@ -278,62 +278,6 @@ export default function ContractDetailPage() {
             </div>
           </div>
 
-          {/* Vygenerovať zmluvu (aktivuje sa po schválení riaditeľom + prílohe so zmluvou) */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title"><Wand2 size={15} /> Vygenerovať finálnu zmluvu</h3>
-            </div>
-            <div className="card-body">
-              {(() => {
-                const directorApproved = contract.director_approved
-                const hasContractFile = (contract.attachments || []).some(a =>
-                  /\.(doc|docx|pdf)$/i.test(a.original_filename)
-                )
-                const canGenerate = directorApproved && hasContractFile
-                return (
-                  <div>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={!canGenerate}
-                      title={!canGenerate ? 'Najprv treba schválenie riaditeľa a priloženú podpísanú zmluvu (Word/PDF)' : 'Vygenerovať'}
-                      onClick={() => toast('Automatické generovanie zmlúv zatiaľ nie je implementované', { icon: 'ℹ️' })}
-                      style={{ opacity: canGenerate ? 1 : 0.5 }}
-                    >
-                      <Wand2 size={14} /> Vygenerovať zmluvu
-                    </button>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8, lineHeight: 1.5 }}>
-                      Aktivuje sa po:<br/>
-                      {directorApproved ? '✓' : '✗'} Schválenie riaditeľom<br/>
-                      {hasContractFile ? '✓' : '✗'} Priložená podpísaná zmluva (.doc/.docx/.pdf)
-                    </div>
-                  </div>
-                )
-              })()}
-            </div>
-          </div>
-
-          {/* Pôvodná PDF príloha (manuálne nahratie) */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title"><FileText size={15} /> Hlavné PDF tlačivo zmluvy</h3>
-              {(user?.role === 'admin' || user?.role === 'ekonom' || user?.role === 'pripravar') && (
-                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-                  <Upload size={14} /> Nahrať PDF
-                  <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfUpload} />
-                </label>
-              )}
-            </div>
-            <div className="card-body">
-              {contract.pdf_path ? (
-                <a href={contractService.getPdfUrl(contract.id)} target="_blank" rel="noopener noreferrer" className="btn btn-ghost">
-                  <FileText size={15} /> {contract.pdf_filename || 'zmluva.pdf'}
-                </a>
-              ) : (
-                <div style={{ color: 'var(--text3)', fontSize: 13 }}>Žiadne hlavné PDF priložené</div>
-              )}
-            </div>
-          </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
