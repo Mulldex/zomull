@@ -14,15 +14,26 @@ from app.models.models import (
     Contract, ContractStatus, User, AuditLog,
     UserRole, Project, ContractAttachment
 )
-from app.schemas.schemas import ContractCreate, ContractUpdate, ContractApprovalUpdate, ContractOut, ContractAttachmentOut
+from app.schemas.schemas import ContractCreate, ContractUpdate, ContractApprovalUpdate, ContractOut, ContractAttachmentOut, ContractResendRequest
 
 router = APIRouter()
 
 
-def _assign_approvers(db: Session, contract: Contract, project_id: Optional[int]):
-    """Priradí schvaľovateľov k zmluve."""
-    # Stavbyvedúci – preferenčne z projektu
-    if project_id:
+def _assign_approvers(db: Session, contract: Contract, project_id: Optional[int], foreman_id_from_payload: Optional[int] = None):
+    """Priradí schvaľovateľov k zmluve (postupný workflow: foreman → director)."""
+    # 1. Stavbyvedúci — priorita:
+    #    a) explicitne zo payload (tvorca ho ručne vybral)
+    #    b) z projektu (foremen)
+    #    c) prvý aktívny stavbyvedúci v systéme (fallback)
+    if foreman_id_from_payload:
+        u = db.query(User).filter(
+            User.id == foreman_id_from_payload,
+            User.role == UserRole.foreman,
+            User.is_active == True,
+        ).first()
+        if u:
+            contract.foreman_id = u.id
+    if not contract.foreman_id and project_id:
         project = db.query(Project).filter(Project.id == project_id).first()
         if project and project.foremen:
             contract.foreman_id = project.foremen[0].id
@@ -33,14 +44,7 @@ def _assign_approvers(db: Session, contract: Contract, project_id: Optional[int]
         if foreman:
             contract.foreman_id = foreman.id
 
-    # Ekonóm
-    ekonom = db.query(User).filter(
-        User.role == UserRole.ekonom, User.is_active == True
-    ).first()
-    if ekonom:
-        contract.ekonom_id = ekonom.id
-
-    # Riaditeľ
+    # 2. Riaditeľ — prvý aktívny v systéme
     director = db.query(User).filter(
         User.role == UserRole.director, User.is_active == True
     ).first()
@@ -54,7 +58,7 @@ def _log(db: Session, contract_id: int, user_id: Optional[int], action: str, det
 
 
 def _check_all_approved(db: Session, contract: Contract):
-    """Skontroluje, či všetci schválili a aktualizuje stav."""
+    """Legacy: ostáva pre kompatibilitu so starým paralelným workflowom."""
     if contract.foreman_approved and contract.ekonom_approved and contract.director_approved:
         contract.status = ContractStatus.approved
         _log(db, contract.id, None, "schválená", "Všetci schvaľovatelia schválili")
@@ -99,10 +103,12 @@ def list_contracts(
 ):
     q = db.query(Contract)
 
+    # Filtrovanie podľa role:
+    #  - admin, ekonom, pripravar, konatel — vidia VŠETKY
+    #  - foreman — vidí len zmluvy kde je on stavbyvedúcim
+    #  - director — vidí len zmluvy kde je on riaditeľ
     if current_user.role == UserRole.foreman:
         q = q.filter(Contract.foreman_id == current_user.id)
-    elif current_user.role == UserRole.ekonom:
-        q = q.filter(Contract.ekonom_id == current_user.id)
     elif current_user.role == UserRole.director:
         q = q.filter(Contract.director_id == current_user.id)
 
@@ -159,10 +165,10 @@ def create_contract(
         supplier_id=payload.supplier_id,
         project_id=payload.project_id,
         notes=payload.notes,
-        status=ContractStatus.pending_approval,
+        status=ContractStatus.pending_foreman,   # 1. krok: čaká na stavbyvedúceho
         created_by=current_user.id,
     )
-    _assign_approvers(db, contract, payload.project_id)
+    _assign_approvers(db, contract, payload.project_id, payload.foreman_id)
     db.add(contract)
     db.commit()
     db.refresh(contract)
@@ -226,10 +232,10 @@ async def create_contract_with_pdf(
         notes=notes,
         pdf_path=filepath,
         pdf_filename=file.filename,
-        status=ContractStatus.pending_approval,
+        status=ContractStatus.pending_foreman,
         created_by=current_user.id,
     )
-    _assign_approvers(db, contract, project_id)
+    _assign_approvers(db, contract, project_id, None)
     db.add(contract)
     db.commit()
     db.refresh(contract)
@@ -293,58 +299,128 @@ def approve_contract(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Postupný workflow: pending_foreman → pending_director → approved.
+    Zamietnutie kdekoľvek → returned_for_rework (tvorca môže pri opätovnom odoslaní voliť odkiaľ pokračovať)."""
     contract = db.query(Contract).filter(Contract.id == contract_id).first()
     if not contract:
         raise HTTPException(404, "Zmluva nenájdená")
-    if contract.status not in [ContractStatus.pending_approval]:
-        if current_user.role != UserRole.admin:
-            raise HTTPException(400, "Zmluva nie je v stave čakania na schválenie")
 
     now = datetime.utcnow()
 
+    # Zamietnutie — kdekoľvek
     if not payload.approved:
-        # Zamietnutie – okamžite celá zmluva zamietnutá
-        contract.status = ContractStatus.rejected
+        if current_user.role not in (UserRole.foreman, UserRole.director, UserRole.admin):
+            raise HTTPException(403, "Nemáte oprávnenie zamietnuť zmluvu")
+        if contract.status not in (ContractStatus.pending_foreman, ContractStatus.pending_director, ContractStatus.pending_approval):
+            raise HTTPException(400, "Zmluva nie je v stave čakania na schválenie")
+
+        # Určí stage podľa aktuálneho stavu / roly
+        if current_user.role == UserRole.foreman or contract.status == ContractStatus.pending_foreman:
+            contract.last_rejected_stage = "foreman"
+        elif current_user.role == UserRole.director or contract.status == ContractStatus.pending_director:
+            contract.last_rejected_stage = "director"
+        else:
+            contract.last_rejected_stage = "foreman"
+
+        contract.status = ContractStatus.returned_for_rework
         contract.rejection_reason = payload.rejection_reason
-        _log(db, contract.id, current_user.id, "zamietnutá",
-             f"{current_user.role.value} zamietol: {payload.rejection_reason}")
+        contract.rejected_by_id = current_user.id
+        contract.rejected_at = now
+        _log(db, contract.id, current_user.id, "vrátená na prepracovanie",
+             f"{current_user.role.value} ({contract.last_rejected_stage}): {payload.rejection_reason}")
         db.commit()
         db.refresh(contract)
         return contract
 
-    # Schválenie podľa roly
-    if current_user.role == UserRole.foreman and contract.foreman_id == current_user.id:
-        if not contract.foreman_approved:
-            contract.foreman_approved = True
-            contract.foreman_approved_at = now
-            _log(db, contract.id, current_user.id, "schválená stavbyvedúcim", None)
+    # Schválenie — postupné
+    # 1. Pending foreman → Pending director
+    if contract.status == ContractStatus.pending_foreman:
+        if current_user.role == UserRole.foreman and contract.foreman_id != current_user.id:
+            raise HTTPException(403, "Túto zmluvu má schváliť iný stavbyvedúci")
+        if current_user.role not in (UserRole.foreman, UserRole.admin):
+            raise HTTPException(403, "V tomto stave môže schváliť len stavbyvedúci")
+        contract.foreman_approved = True
+        contract.foreman_approved_at = now
+        contract.status = ContractStatus.pending_director
+        _log(db, contract.id, current_user.id, "schválená stavbyvedúcim",
+             "Postúpené riaditeľovi")
+        db.commit()
+        db.refresh(contract)
+        return contract
 
-    elif current_user.role == UserRole.ekonom and contract.ekonom_id == current_user.id:
-        if not contract.ekonom_approved:
-            contract.ekonom_approved = True
-            contract.ekonom_approved_at = now
-            _log(db, contract.id, current_user.id, "schválená ekonómom", None)
+    # 2. Pending director → Approved
+    if contract.status == ContractStatus.pending_director:
+        if current_user.role == UserRole.director and contract.director_id != current_user.id:
+            raise HTTPException(403, "Túto zmluvu má schváliť iný riaditeľ")
+        if current_user.role not in (UserRole.director, UserRole.admin):
+            raise HTTPException(403, "V tomto stave môže schváliť len riaditeľ")
+        contract.director_approved = True
+        contract.director_approved_at = now
+        contract.status = ContractStatus.approved
+        _log(db, contract.id, current_user.id, "schválená riaditeľom",
+             "Zmluva finálne schválená")
+        db.commit()
+        db.refresh(contract)
+        return contract
 
-    elif current_user.role == UserRole.director and contract.director_id == current_user.id:
-        if not contract.director_approved:
-            contract.director_approved = True
-            contract.director_approved_at = now
-            _log(db, contract.id, current_user.id, "schválená riaditeľom", None)
-
-    elif current_user.role == UserRole.admin:
+    # Legacy paralelný stav alebo iný — admin override
+    if contract.status == ContractStatus.pending_approval and current_user.role == UserRole.admin:
         contract.foreman_approved = True
         contract.ekonom_approved = True
         contract.director_approved = True
         contract.foreman_approved_at = now
         contract.ekonom_approved_at = now
         contract.director_approved_at = now
-        _log(db, contract.id, current_user.id, "schválená adminom", None)
+        contract.status = ContractStatus.approved
+        _log(db, contract.id, current_user.id, "schválená adminom (legacy)", None)
+        db.commit()
+        db.refresh(contract)
+        return contract
 
+    raise HTTPException(400, f"Zmluvu nemožno schváliť v stave: {contract.status}")
+
+
+@router.post("/{contract_id}/resend", response_model=ContractOut)
+def resend_contract(
+    contract_id: int,
+    payload: ContractResendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Opätovné odoslanie zmluvy na schválenie po prepracovaní.
+    - from_start=True → znova od začiatku (pending_foreman, resetnúť schválenia)
+    - from_start=False → rovno k tomu kto zamietol (pending_{last_rejected_stage})"""
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    if contract.status != ContractStatus.returned_for_rework:
+        raise HTTPException(400, "Zmluvu možno opätovne odoslať len zo stavu 'Vrátená na prepracovanie'")
+    if current_user.id != contract.created_by and current_user.role != UserRole.admin:
+        raise HTTPException(403, "Iba tvorca alebo admin môže znovu odoslať")
+
+    if payload.from_start:
+        contract.status = ContractStatus.pending_foreman
+        contract.foreman_approved = False
+        contract.foreman_approved_at = None
+        contract.director_approved = False
+        contract.director_approved_at = None
+        detail = "Od začiatku"
     else:
-        raise HTTPException(403, "Nemáte oprávnenie schváliť túto zmluvu")
+        stage = contract.last_rejected_stage or "foreman"
+        if stage == "director":
+            contract.status = ContractStatus.pending_director
+        else:
+            contract.status = ContractStatus.pending_foreman
+            contract.foreman_approved = False
+            contract.foreman_approved_at = None
+        detail = f"Od miesta zamietnutia ({stage})"
 
-    db.flush()
-    _check_all_approved(db, contract)
+    contract.rejection_reason = None
+    contract.rejected_by_id = None
+    contract.rejected_at = None
+    contract.last_rejected_stage = None
+
+    _log(db, contract.id, current_user.id, "znova odoslaná na schválenie", detail)
     db.commit()
     db.refresh(contract)
     return contract
@@ -505,7 +581,7 @@ def delete_contract_attachment(
     contract_id: int,
     attachment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman", "director")),
 ):
     att = db.query(ContractAttachment).filter(
         ContractAttachment.id == attachment_id,

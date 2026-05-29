@@ -1,7 +1,7 @@
 export type UserRole = 'admin' | 'ekonom' | 'pripravar' | 'foreman' | 'director' | 'konatel'
 
 export type OrderStatus = 'new' | 'pending_foreman' | 'pending_director' | 'approved' | 'rejected'
-export type ContractStatus = 'new' | 'pending_approval' | 'approved' | 'rejected'
+export type ContractStatus = 'new' | 'pending_approval' | 'pending_foreman' | 'pending_director' | 'returned_for_rework' | 'approved' | 'rejected'
 export type ContractType = 'zmluva_o_dielo' | 'ramcova' | 'kupna' | 'ina'
 
 export interface User {
@@ -191,6 +191,9 @@ export interface Contract {
   created_at: string
   updated_at?: string
   attachments?: ContractAttachment[]
+  rejected_by?: User | null
+  rejected_at?: string | null
+  last_rejected_stage?: string | null
 }
 
 export interface ContractAttachment {
@@ -238,6 +241,9 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
   new: 'Nová',
   pending_approval: 'Čaká na schválenie',
+  pending_foreman: 'Čaká – stavbyvedúci',
+  pending_director: 'Čaká – riaditeľ',
+  returned_for_rework: 'Vrátená na prepracovanie',
   approved: 'Schválená',
   rejected: 'Zamietnutá',
 }

@@ -24,7 +24,7 @@ export default function ApprovePage() {
   useEffect(() => {
     Promise.all([
       orderService.list({ status: 'pending_foreman,pending_director' }),
-      contractService.list({ status: 'pending_approval' }),
+      contractService.list({ status: 'pending_foreman,pending_director,pending_approval' }),
     ]).then(([o, c]) => {
       setOrders(o)
       setContracts(c)
@@ -41,9 +41,8 @@ export default function ApprovePage() {
 
   const myContracts = contracts.filter(c => {
     if (user?.role === 'admin') return true
-    if (user?.role === 'foreman') return c.foreman_approver?.id === user.id && !c.foreman_approved
-    if (user?.role === 'ekonom') return c.ekonom_approver?.id === user.id && !c.ekonom_approved
-    if (user?.role === 'director') return c.director_approver?.id === user.id && !c.director_approved
+    if (user?.role === 'foreman') return c.status === 'pending_foreman' && c.foreman_approver?.id === user.id
+    if (user?.role === 'director') return c.status === 'pending_director' && c.director_approver?.id === user.id
     return false
   })
 

@@ -106,19 +106,37 @@ export default function ContractDetailPage() {
   const myApprovalDone = () => {
     if (!contract || !user) return false
     if (user.role === 'foreman') return contract.foreman_approved
-    if (user.role === 'ekonom') return contract.ekonom_approved
     if (user.role === 'director') return contract.director_approved
     return false
   }
 
   const canApprove = () => {
     if (!contract || !user) return false
-    if (contract.status !== 'pending_approval') return false
-    if (user.role === 'admin') return true
-    if (user.role === 'foreman') return contract.foreman_approver?.id === user.id && !contract.foreman_approved
-    if (user.role === 'ekonom') return contract.ekonom_approver?.id === user.id && !contract.ekonom_approved
-    if (user.role === 'director') return contract.director_approver?.id === user.id && !contract.director_approved
+    if (user.role === 'admin') {
+      return ['pending_foreman', 'pending_director', 'pending_approval'].includes(contract.status)
+    }
+    if (contract.status === 'pending_foreman' && user.role === 'foreman') {
+      return contract.foreman_approver?.id === user.id
+    }
+    if (contract.status === 'pending_director' && user.role === 'director') {
+      return contract.director_approver?.id === user.id
+    }
     return false
+  }
+
+  const isCreator = () => contract?.creator?.id === user?.id
+  const canResend = () => (contract?.status === 'returned_for_rework') && (isCreator() || user?.role === 'admin')
+
+  const handleResend = async (fromStart: boolean) => {
+    if (!contract) return
+    setSubmitting(true)
+    try {
+      await contractService.resend(contract.id, fromStart)
+      toast.success(fromStart ? 'Odoslané od začiatku' : 'Odoslané k tomu kto zamietol')
+      load()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Chyba')
+    } finally { setSubmitting(false) }
   }
 
   const handleApprove = async () => {
@@ -284,13 +302,32 @@ export default function ContractDetailPage() {
           <div className="card">
             <div className="card-header"><h3 className="card-title">Stav schvaľovania</h3></div>
             <div className="card-body">
-              <ApproverRow label="Stavbyvedúci" user={contract.foreman_approver} approved={contract.foreman_approved} approvedAt={contract.foreman_approved_at} />
-              <ApproverRow label="Ekonóm" user={contract.ekonom_approver} approved={contract.ekonom_approved} approvedAt={contract.ekonom_approved_at} />
-              <ApproverRow label="Riaditeľ" user={contract.director_approver} approved={contract.director_approved} approvedAt={contract.director_approved_at} />
+              <ApproverRow label="1. Stavbyvedúci" user={contract.foreman_approver} approved={contract.foreman_approved} approvedAt={contract.foreman_approved_at} />
+              <ApproverRow label="2. Riaditeľ" user={contract.director_approver} approved={contract.director_approved} approvedAt={contract.director_approved_at} />
 
               {contract.rejection_reason && (
                 <div className="alert alert-error" style={{ fontSize: 12, marginTop: 12 }}>
-                  <strong>Dôvod zamietnutia:</strong> {contract.rejection_reason}
+                  <strong>Vrátená na prepracovanie</strong>
+                  {contract.rejected_by && <> ({contract.rejected_by.full_name})</>}
+                  {contract.last_rejected_stage && <> – krok: {contract.last_rejected_stage === 'foreman' ? 'stavbyvedúci' : 'riaditeľ'}</>}
+                  <div style={{ marginTop: 4 }}>Dôvod: {contract.rejection_reason}</div>
+                </div>
+              )}
+
+              {canResend() && (
+                <div style={{ marginTop: 12, padding: 12, background: 'var(--surface2)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Opätovne odoslať na schválenie</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
+                    Najprv uprav prílohy. Potom zvoľ odkiaľ pokračovať:
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => handleResend(false)} disabled={submitting}>
+                      Rovno k tomu kto zamietol ({contract.last_rejected_stage === 'foreman' ? 'stavbyvedúci' : 'riaditeľ'})
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleResend(true)} disabled={submitting}>
+                      Od začiatku (znova stavbyvedúci → riaditeľ)
+                    </button>
+                  </div>
                 </div>
               )}
 

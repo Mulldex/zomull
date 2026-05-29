@@ -31,6 +31,9 @@ class ContractType(str, Enum):
 class ContractStatus(str, Enum):
     new = "new"
     pending_approval = "pending_approval"
+    pending_foreman = "pending_foreman"
+    pending_director = "pending_director"
+    returned_for_rework = "returned_for_rework"
     approved = "approved"
     rejected = "rejected"
 
@@ -421,6 +424,7 @@ class ContractCreate(BaseModel):
     valid_to: Optional[datetime] = None
     supplier_id: Optional[int] = None
     project_id: Optional[int] = None
+    foreman_id: Optional[int] = None  # tvorca môže ručne vybrať stavbyvedúceho
     notes: Optional[str] = None
 
 
@@ -476,9 +480,18 @@ class ContractOut(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     attachments: List["ContractAttachmentOut"] = []
+    # Vrátenie na prepracovanie
+    rejected_by: Optional[UserOut] = None
+    rejected_at: Optional[datetime] = None
+    last_rejected_stage: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class ContractResendRequest(BaseModel):
+    """Pri opätovnom odoslaní po prepracovaní — od začiatku alebo od miesta zamietnutia."""
+    from_start: bool = False   # True = znova celý reťazec, False = rovno k tomu kto zamietol
 
 
 # ── APPROVAL RULES ────────────────────────────────────────────────────────────

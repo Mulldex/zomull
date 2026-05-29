@@ -43,7 +43,10 @@ class ContractType(str, enum.Enum):
 
 class ContractStatus(str, enum.Enum):
     new = "new"
-    pending_approval = "pending_approval"   # Paralelné schvaľovanie
+    pending_approval = "pending_approval"   # Legacy: paralelné schvaľovanie (ostáva pre kompatibilitu)
+    pending_foreman = "pending_foreman"     # Čaká na stavbyvedúceho (1. krok)
+    pending_director = "pending_director"   # Čaká na riaditeľa (2. krok)
+    returned_for_rework = "returned_for_rework"  # Zamietnutá → vrátená tvorcovi na prepracovanie
     approved = "approved"
     rejected = "rejected"
 
@@ -252,13 +255,18 @@ class Contract(Base):
     status           = Column(SAEnum(ContractStatus), default=ContractStatus.new)
     rejection_reason = Column(Text, nullable=True)
 
-    # Paralelné schvaľovanie – každý schvaľuje nezávisle
+    # Postupné + paralelné schvaľovanie (zachované pre kompatibilitu)
     foreman_approved    = Column(Boolean, default=False)
     ekonom_approved     = Column(Boolean, default=False)
     director_approved   = Column(Boolean, default=False)
     foreman_approved_at  = Column(DateTime, nullable=True)
     ekonom_approved_at   = Column(DateTime, nullable=True)
     director_approved_at = Column(DateTime, nullable=True)
+
+    # Vrátenie na prepracovanie
+    rejected_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rejected_at           = Column(DateTime, nullable=True)
+    last_rejected_stage   = Column(String(50), nullable=True)  # 'foreman' alebo 'director' — kde bola zamietnutá
 
     # Priradení schvaľovatelia
     foreman_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -280,6 +288,7 @@ class Contract(Base):
                                     foreign_keys=[ekonom_id])
     director_approver = relationship("User", back_populates="director_contracts",
                                      foreign_keys=[director_id])
+    rejected_by      = relationship("User", foreign_keys=[rejected_by_id])
     audit_logs       = relationship("AuditLog", back_populates="contract",
                                     foreign_keys="AuditLog.contract_id")
 

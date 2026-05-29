@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { contractService, projectService, supplierService } from '../services/documentService'
-import type { Project, Supplier } from '../types'
+import { contractService, projectService, supplierService, userService } from '../services/documentService'
+import type { Project, Supplier, User } from '../types'
 import { CONTRACT_TYPE_LABELS, CURRENCY_OPTIONS, ROLE_LABELS } from '../types'
 import { useAuth } from '../context/AuthContext'
 
@@ -26,12 +26,27 @@ export default function CreateContractPage() {
   const [validTo, setValidTo] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [projectId, setProjectId] = useState('')
+  const [foremanId, setForemanId] = useState('')
   const [notes, setNotes] = useState('')
+  const [foremen, setForemen] = useState<User[]>([])
 
   useEffect(() => {
-    Promise.all([projectService.list(), supplierService.list()])
-      .then(([p, s]) => { setProjects(p); setSuppliers(s) })
+    Promise.all([projectService.list(), supplierService.list(), userService.list()])
+      .then(([p, s, u]) => {
+        setProjects(p); setSuppliers(s)
+        setForemen(u.filter(x => x.role === 'foreman' && x.is_active))
+      })
+      .catch(() => {})
   }, [])
+
+  // Pri zmene projektu predvyplň foreman podľa projektu (ak je priradený)
+  useEffect(() => {
+    if (!projectId) return
+    const p = projects.find(p => p.id === +projectId)
+    if (p?.foremen && p.foremen.length > 0) {
+      setForemanId(String(p.foremen[0].id))
+    }
+  }, [projectId, projects])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -74,6 +89,7 @@ export default function CreateContractPage() {
           valid_to: toISO(validTo),
           supplier_id: supplierId ? +supplierId : null,
           project_id: projectId ? +projectId : null,
+          foreman_id: foremanId ? +foremanId : null,
           notes: notes || null,
         })
         toast.success('Zmluva bola vytvorená a odoslaná na schválenie')
@@ -174,12 +190,24 @@ export default function CreateContractPage() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Projekt / stavba</label>
-              <select value={projectId} onChange={e => setProjectId(e.target.value)}>
-                <option value="">-- Bez projektu --</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
-              </select>
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Projekt / stavba</label>
+                <select value={projectId} onChange={e => setProjectId(e.target.value)}>
+                  <option value="">-- Bez projektu --</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Stavbyvedúci (1. schvaľovateľ)</label>
+                <select value={foremanId} onChange={e => setForemanId(e.target.value)}>
+                  <option value="">-- Automaticky (z projektu / prvý dostupný) --</option>
+                  {foremen.map(f => <option key={f.id} value={f.id}>{f.full_name}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+                  Po vytvorení zmluvy ide na schválenie tomuto stavbyvedúcemu, potom riaditeľovi.
+                </div>
+              </div>
             </div>
 
             {/* PDF upload */}

@@ -135,6 +135,10 @@ export const contractService = {
     const { data } = await api.patch<Contract>(`/contracts/${id}/approve`, payload)
     return data
   },
+  resend: async (id: number, fromStart: boolean): Promise<Contract> => {
+    const { data } = await api.post<Contract>(`/contracts/${id}/resend`, { from_start: fromStart })
+    return data
+  },
   update: async (id: number, payload: any): Promise<Contract> => {
     const { data } = await api.patch<Contract>(`/contracts/${id}`, payload)
     return data

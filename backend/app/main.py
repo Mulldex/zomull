@@ -47,6 +47,10 @@ def _run_migrations():
         "ALTER TABLE suppliers ALTER COLUMN ico TYPE VARCHAR(30)",
         "ALTER TABLE suppliers ALTER COLUMN dic TYPE VARCHAR(50)",
         "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ic_dph VARCHAR(30)",
+        # Contract workflow — vrátenie na prepracovanie
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS rejected_by_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS last_rejected_stage VARCHAR(50)",
     ]
     with engine.begin() as conn:
         for stmt in statements:
@@ -59,6 +63,9 @@ def _run_migrations():
     enum_alters = [
         "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'pripravar'",
         "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'konatel'",
+        "ALTER TYPE contractstatus ADD VALUE IF NOT EXISTS 'pending_foreman'",
+        "ALTER TYPE contractstatus ADD VALUE IF NOT EXISTS 'pending_director'",
+        "ALTER TYPE contractstatus ADD VALUE IF NOT EXISTS 'returned_for_rework'",
     ]
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         for stmt in enum_alters:
