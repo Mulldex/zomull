@@ -58,6 +58,7 @@ def _run_migrations():
     # ALTER TYPE ADD VALUE musí byť mimo transakcie v PostgreSQL
     enum_alters = [
         "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'pripravar'",
+        "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'konatel'",
     ]
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         for stmt in enum_alters:

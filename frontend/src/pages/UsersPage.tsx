@@ -9,7 +9,7 @@ function initials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 const avatarColors: Record<UserRole, string> = {
-  admin: 'red', ekonom: 'green', pripravar: 'green', foreman: 'amber', director: '',
+  admin: 'red', ekonom: 'green', pripravar: 'green', foreman: 'amber', director: '', konatel: 'blue',
 }
 
 export default function UsersPage() {
@@ -88,8 +88,16 @@ export default function UsersPage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{
                   fontSize: 11, padding: '3px 10px', borderRadius: 20, fontWeight: 500,
-                  background: u.role === 'admin' ? 'var(--brand-red-light)' : (u.role === 'ekonom' || u.role === 'pripravar') ? 'var(--green-light)' : u.role === 'foreman' ? 'var(--amber-light)' : 'var(--blue-light)',
-                  color: u.role === 'admin' ? 'var(--brand-red)' : (u.role === 'ekonom' || u.role === 'pripravar') ? 'var(--green)' : u.role === 'foreman' ? 'var(--amber)' : 'var(--blue)',
+                  background: u.role === 'admin' ? 'var(--brand-red-light)'
+                    : (u.role === 'ekonom' || u.role === 'pripravar') ? 'var(--green-light)'
+                    : u.role === 'foreman' ? 'var(--amber-light)'
+                    : u.role === 'konatel' ? 'var(--blue-light)'
+                    : 'var(--blue-light)',
+                  color: u.role === 'admin' ? 'var(--brand-red)'
+                    : (u.role === 'ekonom' || u.role === 'pripravar') ? 'var(--green)'
+                    : u.role === 'foreman' ? 'var(--amber)'
+                    : u.role === 'konatel' ? 'var(--blue)'
+                    : 'var(--blue)',
                 }}>{ROLE_LABELS[u.role]}</span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button className="btn btn-ghost btn-sm" title="Zmeniť heslo" onClick={() => { setResetPasswordUser(u); setNewPassword('') }}><KeyRound size={13} /></button>
@@ -116,6 +124,7 @@ export default function UsersPage() {
                   <option value="pripravar">Prípravár</option>
                   <option value="foreman">Stavbyvedúci</option>
                   <option value="director">Riaditeľ</option>
+                  <option value="konatel">Konateľ (read-only)</option>
                   <option value="admin">Administrátor</option>
                 </select>
               </div>

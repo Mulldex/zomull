@@ -64,7 +64,7 @@ function AppLayout() {
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
   )?.[1] ?? 'ZOMULL'
 
-  // Objednávky môžu vytvárať všetky role okrem… (vlastne všetky)
+  // Objednávky môžu vytvárať všetky role okrem konateľa (read-only)
   const canCreateOrder = ['admin', 'ekonom', 'pripravar', 'foreman', 'director'].includes(user.role)
   // Zmluvy môžu vytvárať admin, ekonóm a prípravár
   const canCreateContract = user.role === 'admin' || user.role === 'ekonom' || user.role === 'pripravar'

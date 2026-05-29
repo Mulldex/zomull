@@ -16,6 +16,7 @@ const avatarColors: Record<string, string> = {
   pripravar: 'green',
   foreman: 'amber',
   director: '',
+  konatel: 'blue',
 }
 
 export default function Sidebar({ pendingCount }: { pendingCount: number }) {

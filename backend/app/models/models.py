@@ -17,6 +17,7 @@ class UserRole(str, enum.Enum):
     pripravar = "pripravar"     # Prípravár (rovnaké CRUD práva ako ekonóm)
     foreman = "foreman"         # Stavbyvedúci
     director = "director"       # Riaditeľ
+    konatel = "konatel"         # Konateľ — read-only, vidí všetko, žiadne notifikácie
 
 
 class SupplierStatus(str, enum.Enum):

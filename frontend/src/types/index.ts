@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'ekonom' | 'pripravar' | 'foreman' | 'director'
+export type UserRole = 'admin' | 'ekonom' | 'pripravar' | 'foreman' | 'director' | 'konatel'
 
 export type OrderStatus = 'new' | 'pending_foreman' | 'pending_director' | 'approved' | 'rejected'
 export type ContractStatus = 'new' | 'pending_approval' | 'approved' | 'rejected'
@@ -213,6 +213,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   pripravar: 'Prípravár',
   foreman: 'Stavbyvedúci',
   director: 'Riaditeľ',
+  konatel: 'Konateľ',
 }
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
