@@ -35,14 +35,16 @@ export default function ApprovePage() {
   const myOrders = orders.filter(o => {
     if (user?.role === 'admin') return true
     if (user?.role === 'foreman') return o.status === 'pending_foreman' && o.foreman?.id === user.id
-    if (user?.role === 'director') return o.status === 'pending_director' && o.director?.id === user.id
+    // Ktorýkoľvek riaditeľ môže schváliť pending_director
+    if (user?.role === 'director') return o.status === 'pending_director'
     return false
   })
 
   const myContracts = contracts.filter(c => {
     if (user?.role === 'admin') return true
     if (user?.role === 'foreman') return c.status === 'pending_foreman' && c.foreman_approver?.id === user.id
-    if (user?.role === 'director') return c.status === 'pending_director' && c.director_approver?.id === user.id
+    // Ktorýkoľvek riaditeľ môže schváliť pending_director
+    if (user?.role === 'director') return c.status === 'pending_director'
     return false
   })
 

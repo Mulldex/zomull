@@ -114,7 +114,12 @@ def list_orders(
     if current_user.role == UserRole.foreman:
         q = q.filter(Order.foreman_id == current_user.id)
     elif current_user.role == UserRole.director:
-        q = q.filter(Order.director_id == current_user.id)
+        # Riaditeľ vidí všetky OBJ ktoré čakajú na riaditeľa (ktokoľvek môže schváliť)
+        # + tie ktoré on schválil/zamietol (director_id == self)
+        q = q.filter(
+            (Order.status == OrderStatus.pending_director) |
+            (Order.director_id == current_user.id)
+        )
 
     if status:
         statuses = [s.strip() for s in status.split(',')]
@@ -161,7 +166,9 @@ def create_order(
     foreman_limit = _get_foreman_limit(db)
     requires_director = payload.total_amount > foreman_limit
     foreman = _get_foreman(db, payload.project_id)
-    director = _get_director(db) if requires_director else None
+    # Neviazať na konkrétneho riaditeľa — pri schválení sa zaznamená kto.
+    # Slúži len ako "potenciálny" priradený riaditeľ (môže ho schváliť ktorýkoľvek aktívny).
+    director = None
 
     order = Order(
         order_number=order_number,
@@ -275,7 +282,9 @@ async def create_order_with_pdf(
     foreman_limit = _get_foreman_limit(db)
     requires_director = total_amount > foreman_limit
     foreman = _get_foreman(db, project_id)
-    director = _get_director(db) if requires_director else None
+    # Neviazať na konkrétneho riaditeľa — pri schválení sa zaznamená kto.
+    # Slúži len ako "potenciálny" priradený riaditeľ (môže ho schváliť ktorýkoľvek aktívny).
+    director = None
 
     order = Order(
         order_number=order_number,
@@ -312,6 +321,68 @@ async def create_order_with_pdf(
     _log(db, order.id, current_user.id, "vytvorená s PDF",
          f"Objednávka s PDF, suma: {order.total_amount} {order.currency}")
     return order
+
+
+@router.patch("/{order_id}/approve", response_model=OrderOut)
+def approve_order(
+    order_id: int,
+    payload: OrderStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Postupný workflow: pending_foreman → pending_director (ak requires_director) → approved.
+    Pri pending_director ktorýkoľvek aktívny riaditeľ môže schváliť — zaznamená sa kto."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Objednávka nenájdená")
+
+    now = datetime.utcnow()
+
+    # Zamietnutie kdekoľvek
+    if payload.status == OrderStatus.rejected:
+        if current_user.role not in (UserRole.foreman, UserRole.director, UserRole.admin):
+            raise HTTPException(403, "Nemáte oprávnenie zamietnuť objednávku")
+        order.status = OrderStatus.rejected
+        order.rejection_reason = payload.rejection_reason
+        if current_user.role == UserRole.director:
+            order.director_id = current_user.id   # zaznamenáme kto zamietol
+        _log(db, order.id, current_user.id, "zamietnutá",
+             f"{current_user.role.value}: {payload.rejection_reason or '—'}")
+        db.commit()
+        db.refresh(order)
+        return order
+
+    # Schválenie — postupné
+    # 1. Pending foreman → Pending director ALEBO Approved (podľa requires_director)
+    if order.status == OrderStatus.pending_foreman:
+        if current_user.role == UserRole.foreman and order.foreman_id != current_user.id:
+            raise HTTPException(403, "Túto objednávku má schváliť iný stavbyvedúci")
+        if current_user.role not in (UserRole.foreman, UserRole.admin):
+            raise HTTPException(403, "V tomto stave môže schváliť len stavbyvedúci")
+        order.foreman_approved_at = now
+        if order.requires_director:
+            order.status = OrderStatus.pending_director
+            _log(db, order.id, current_user.id, "schválená stavbyvedúcim", "Postúpené riaditeľovi")
+        else:
+            order.status = OrderStatus.approved
+            _log(db, order.id, current_user.id, "schválená stavbyvedúcim", "Finálne schválená")
+        db.commit()
+        db.refresh(order)
+        return order
+
+    # 2. Pending director → Approved (ktorýkoľvek riaditeľ)
+    if order.status == OrderStatus.pending_director:
+        if current_user.role not in (UserRole.director, UserRole.admin):
+            raise HTTPException(403, "V tomto stave môže schváliť len riaditeľ")
+        order.director_id = current_user.id   # zaznamenáme kto schválil
+        order.status = OrderStatus.approved
+        _log(db, order.id, current_user.id, "schválená riaditeľom",
+             f"Schválil {current_user.full_name}")
+        db.commit()
+        db.refresh(order)
+        return order
+
+    raise HTTPException(400, f"Objednávku nemožno schváliť v stave: {order.status}")
 
 
 @router.post("/{order_id}/pdf", response_model=OrderOut)

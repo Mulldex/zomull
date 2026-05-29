@@ -88,7 +88,8 @@ export default function OrderDetailPage() {
     if (!order || !user) return false
     if (user.role === 'admin') return order.status !== 'approved' && order.status !== 'rejected'
     if (user.role === 'foreman') return order.status === 'pending_foreman' && order.foreman?.id === user.id
-    if (user.role === 'director') return order.status === 'pending_director' && order.director?.id === user.id
+    // Ktorýkoľvek aktívny riaditeľ môže schváliť pending_director
+    if (user.role === 'director') return order.status === 'pending_director'
     return false
   }
 

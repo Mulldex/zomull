@@ -118,8 +118,9 @@ export default function ContractDetailPage() {
     if (contract.status === 'pending_foreman' && user.role === 'foreman') {
       return contract.foreman_approver?.id === user.id
     }
+    // Ktorýkoľvek riaditeľ môže schváliť pending_director
     if (contract.status === 'pending_director' && user.role === 'director') {
-      return contract.director_approver?.id === user.id
+      return true
     }
     return false
   }

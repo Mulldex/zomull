@@ -44,12 +44,8 @@ def _assign_approvers(db: Session, contract: Contract, project_id: Optional[int]
         if foreman:
             contract.foreman_id = foreman.id
 
-    # 2. Riaditeľ — prvý aktívny v systéme
-    director = db.query(User).filter(
-        User.role == UserRole.director, User.is_active == True
-    ).first()
-    if director:
-        contract.director_id = director.id
+    # 2. Riaditeľ — neviazať na konkrétneho. Pri schválení sa zaznamená kto.
+    # Director_id zostane None kým niekto z aktívnych riaditeľov neschváli.
 
 
 def _log(db: Session, contract_id: int, user_id: Optional[int], action: str, detail: str = None):
@@ -106,11 +102,14 @@ def list_contracts(
     # Filtrovanie podľa role:
     #  - admin, ekonom, pripravar, konatel — vidia VŠETKY
     #  - foreman — vidí len zmluvy kde je on stavbyvedúcim
-    #  - director — vidí len zmluvy kde je on riaditeľ
+    #  - director — vidí všetky pending_director (ktokoľvek môže schváliť) + tie ktoré on schválil/zamietol
     if current_user.role == UserRole.foreman:
         q = q.filter(Contract.foreman_id == current_user.id)
     elif current_user.role == UserRole.director:
-        q = q.filter(Contract.director_id == current_user.id)
+        q = q.filter(
+            (Contract.status == ContractStatus.pending_director) |
+            (Contract.director_id == current_user.id)
+        )
 
     if status:
         statuses = [s.strip() for s in status.split(',')]
@@ -326,6 +325,9 @@ def approve_contract(
         contract.rejection_reason = payload.rejection_reason
         contract.rejected_by_id = current_user.id
         contract.rejected_at = now
+        # Ak zamietol riaditeľ pri pending_director, zaznamenáme aj kto schvaľoval (director_id)
+        if current_user.role == UserRole.director:
+            contract.director_id = current_user.id
         _log(db, contract.id, current_user.id, "vrátená na prepracovanie",
              f"{current_user.role.value} ({contract.last_rejected_stage}): {payload.rejection_reason}")
         db.commit()
@@ -348,17 +350,16 @@ def approve_contract(
         db.refresh(contract)
         return contract
 
-    # 2. Pending director → Approved
+    # 2. Pending director → Approved (ktorýkoľvek aktívny riaditeľ)
     if contract.status == ContractStatus.pending_director:
-        if current_user.role == UserRole.director and contract.director_id != current_user.id:
-            raise HTTPException(403, "Túto zmluvu má schváliť iný riaditeľ")
         if current_user.role not in (UserRole.director, UserRole.admin):
             raise HTTPException(403, "V tomto stave môže schváliť len riaditeľ")
+        contract.director_id = current_user.id   # zaznamenáme kto schválil
         contract.director_approved = True
         contract.director_approved_at = now
         contract.status = ContractStatus.approved
         _log(db, contract.id, current_user.id, "schválená riaditeľom",
-             "Zmluva finálne schválená")
+             f"Schválil {current_user.full_name}")
         db.commit()
         db.refresh(contract)
         return contract
