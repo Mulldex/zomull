@@ -190,6 +190,17 @@ export interface Contract {
   audit_logs?: AuditLog[]
   created_at: string
   updated_at?: string
+  attachments?: ContractAttachment[]
+}
+
+export interface ContractAttachment {
+  id: number
+  original_filename: string
+  file_size?: number | null
+  mime_type?: string | null
+  label?: string | null
+  uploaded_at: string
+  uploader?: User | null
 }
 
 export interface ApprovalRule {

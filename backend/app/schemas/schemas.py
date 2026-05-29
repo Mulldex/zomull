@@ -335,6 +335,19 @@ class OrderAttachmentOut(BaseModel):
         from_attributes = True
 
 
+class ContractAttachmentOut(BaseModel):
+    id: int
+    original_filename: str
+    file_size: Optional[int]
+    mime_type: Optional[str]
+    label: Optional[str]
+    uploaded_at: datetime
+    uploader: Optional[UserOut] = None
+
+    class Config:
+        from_attributes = True
+
+
 # ── PROJECT COST ITEMS ───────────────────────────────────────────────────────
 
 class CostItemBase(BaseModel):
@@ -462,6 +475,7 @@ class ContractOut(BaseModel):
     audit_logs: List[AuditLogOut] = []
     created_at: datetime
     updated_at: Optional[datetime]
+    attachments: List["ContractAttachmentOut"] = []
 
     class Config:
         from_attributes = True

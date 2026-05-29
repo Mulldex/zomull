@@ -66,8 +66,8 @@ function AppLayout() {
 
   // Objednávky môžu vytvárať všetky role okrem konateľa (read-only)
   const canCreateOrder = ['admin', 'ekonom', 'pripravar', 'foreman', 'director'].includes(user.role)
-  // Zmluvy môžu vytvárať admin, ekonóm a prípravár
-  const canCreateContract = user.role === 'admin' || user.role === 'ekonom' || user.role === 'pripravar'
+  // Zmluvy môžu vytvárať admin, ekonóm, prípravár a stavbyvedúci
+  const canCreateContract = ['admin', 'ekonom', 'pripravar', 'foreman'].includes(user.role)
 
   return (
     <div className="app-layout">

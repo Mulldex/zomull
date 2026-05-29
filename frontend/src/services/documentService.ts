@@ -1,5 +1,5 @@
 import api from './api'
-import type { TokenResponse, User, Order, OrderAttachment, Contract, Project, Supplier, ApprovalRule, CompanyInfo, CostItem } from '../types'
+import type { TokenResponse, User, Order, OrderAttachment, Contract, ContractAttachment, Project, Supplier, ApprovalRule, CompanyInfo, CostItem } from '../types'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authService = {
@@ -142,6 +142,36 @@ export const contractService = {
   getPdfUrl: (id: number) => `/api/contracts/${id}/pdf`,
   delete: async (id: number): Promise<void> => {
     await api.delete(`/contracts/${id}`)
+  },
+  // Prílohy k zmluvám
+  listAttachments: async (id: number): Promise<ContractAttachment[]> => {
+    const { data } = await api.get<ContractAttachment[]>(`/contracts/${id}/attachments`)
+    return data
+  },
+  uploadAttachment: async (id: number, file: File, label?: string): Promise<ContractAttachment> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (label) fd.append('label', label)
+    const { data } = await api.post<ContractAttachment>(`/contracts/${id}/attachments`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+  downloadAttachment: async (id: number, attId: number, filename: string): Promise<void> => {
+    const resp = await api.get(`/contracts/${id}/attachments/${attId}`, { responseType: 'blob' })
+    const ct = resp.headers['content-type']
+    const blob = new Blob([resp.data], { type: typeof ct === 'string' ? ct : 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  },
+  deleteAttachment: async (id: number, attId: number): Promise<void> => {
+    await api.delete(`/contracts/${id}/attachments/${attId}`)
   },
 }
 

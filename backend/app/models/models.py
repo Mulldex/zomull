@@ -340,6 +340,24 @@ class OrderAttachment(Base):
     uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
+class ContractAttachment(Base):
+    """Príloha k zmluve (napr. podpísaná zmluva o dielo, email, doplňujúce dokumenty)."""
+    __tablename__ = "contract_attachments"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    contract_id       = Column(Integer, ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_filename = Column(String(255), nullable=False)
+    file_path         = Column(String(500), nullable=False)
+    file_size         = Column(Integer, nullable=True)
+    mime_type         = Column(String(150), nullable=True)
+    label             = Column(String(150), nullable=True)   # napr. "Podpísaná zmluva o dielo"
+    uploaded_by       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    contract = relationship("Contract", backref="attachments")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
 class ProjectCostItem(Base):
     """
     Nákladová položka projektu — hierarchická (parent_id self-reference).

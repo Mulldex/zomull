@@ -12,9 +12,9 @@ from app.core.security import get_current_user, require_role
 from app.core.config import settings
 from app.models.models import (
     Contract, ContractStatus, User, AuditLog,
-    UserRole, Project
+    UserRole, Project, ContractAttachment
 )
-from app.schemas.schemas import ContractCreate, ContractUpdate, ContractApprovalUpdate, ContractOut
+from app.schemas.schemas import ContractCreate, ContractUpdate, ContractApprovalUpdate, ContractOut, ContractAttachmentOut
 
 router = APIRouter()
 
@@ -140,7 +140,7 @@ def get_contract(
 def create_contract(
     payload: ContractCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman")),
 ):
     contract_number = payload.contract_number or _generate_contract_number(db, payload.project_id)
     if db.query(Contract).filter(Contract.contract_number == contract_number).first():
@@ -189,7 +189,7 @@ async def create_contract_with_pdf(
     notes: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman")),
 ):
     if not contract_number:
         contract_number = _generate_contract_number(db, project_id)
@@ -243,7 +243,7 @@ async def attach_pdf(
     contract_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman")),
 ):
     contract = db.query(Contract).filter(Contract.id == contract_id).first()
     if not contract:
@@ -357,7 +357,7 @@ def update_contract(
     contract_id: int,
     payload: ContractUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman")),
 ):
     contract = db.query(Contract).filter(Contract.id == contract_id).first()
     if not contract:
@@ -386,3 +386,140 @@ def delete_contract(
     db.delete(contract)
     db.commit()
     return {"message": "Zmluva vymazaná"}
+
+
+# ── Prílohy k zmluvám (Word, Excel, PDF, MSG/EML, obrázky) ────────────────────
+
+ALLOWED_CONTRACT_ATT_EXTS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".csv",
+    ".msg", ".eml", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".zip", ".rar", ".7z", ".txt", ".rtf", ".odt", ".ods",
+}
+
+CONTRACT_MIME_BY_EXT = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".csv": "text/csv",
+    ".msg": "application/vnd.ms-outlook",
+    ".eml": "message/rfc822",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".zip": "application/zip",
+    ".rar": "application/vnd.rar",
+    ".7z": "application/x-7z-compressed",
+    ".txt": "text/plain",
+    ".rtf": "application/rtf",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+}
+
+
+@router.get("/{contract_id}/attachments", response_model=List[ContractAttachmentOut])
+def list_contract_attachments(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+    return contract.attachments
+
+
+@router.post("/{contract_id}/attachments", response_model=ContractAttachmentOut)
+async def upload_contract_attachment(
+    contract_id: int,
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar", "foreman", "director")),
+):
+    """Nahrať prílohu k zmluve (Word, Excel, PDF, .msg/.eml, obrázky)."""
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(404, "Zmluva nenájdená")
+
+    original = file.filename or "subor"
+    ext = os.path.splitext(original)[1].lower()
+    if ext not in ALLOWED_CONTRACT_ATT_EXTS:
+        allowed = ", ".join(sorted(ALLOWED_CONTRACT_ATT_EXTS))
+        raise HTTPException(400, f"Nepodporovaný formát. Povolené: {allowed}")
+
+    content = await file.read()
+    if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(400, f"Súbor je príliš veľký (max {settings.MAX_FILE_SIZE_MB} MB)")
+
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    safe_name = f"contract_{contract_id}_att_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(settings.UPLOAD_DIR, safe_name)
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    att = ContractAttachment(
+        contract_id=contract_id,
+        original_filename=original,
+        file_path=filepath,
+        file_size=len(content),
+        mime_type=CONTRACT_MIME_BY_EXT.get(ext, file.content_type or "application/octet-stream"),
+        label=label,
+        uploaded_by=current_user.id,
+    )
+    db.add(att)
+    db.commit()
+    db.refresh(att)
+    _log(db, contract_id, current_user.id, "Príloha zmluvy nahratá", f"{label or '—'}: {original}")
+    return att
+
+
+@router.get("/{contract_id}/attachments/{attachment_id}")
+def download_contract_attachment(
+    contract_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    att = db.query(ContractAttachment).filter(
+        ContractAttachment.id == attachment_id,
+        ContractAttachment.contract_id == contract_id,
+    ).first()
+    if not att:
+        raise HTTPException(404, "Príloha nenájdená")
+    if not os.path.exists(att.file_path):
+        raise HTTPException(404, "Súbor neexistuje na disku")
+    return FileResponse(
+        att.file_path,
+        media_type=att.mime_type or "application/octet-stream",
+        filename=att.original_filename,
+    )
+
+
+@router.delete("/{contract_id}/attachments/{attachment_id}")
+def delete_contract_attachment(
+    contract_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "ekonom", "pripravar")),
+):
+    att = db.query(ContractAttachment).filter(
+        ContractAttachment.id == attachment_id,
+        ContractAttachment.contract_id == contract_id,
+    ).first()
+    if not att:
+        raise HTTPException(404, "Príloha nenájdená")
+    if att.file_path and os.path.exists(att.file_path):
+        try:
+            os.remove(att.file_path)
+        except Exception:
+            pass
+    original = att.original_filename
+    db.delete(att)
+    db.commit()
+    _log(db, contract_id, current_user.id, "Príloha zmluvy zmazaná", original)
+    return {"ok": True}

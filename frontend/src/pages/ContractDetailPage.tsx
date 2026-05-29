@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { CheckCircle, XCircle, FileText, ArrowLeft, Trash2, Upload, Check, X } from 'lucide-react'
+import { CheckCircle, XCircle, FileText, ArrowLeft, Trash2, Upload, Check, X, Paperclip, Download, Wand2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { contractService } from '../services/documentService'
 import type { Contract } from '../types'
@@ -50,6 +50,49 @@ export default function ContractDetailPage() {
   const [rejecting, setRejecting] = useState(false)
   const [rejectionReason, setRejectionReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [attachmentLabel, setAttachmentLabel] = useState('Zmluva o dielo')
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!contract || !e.target.files?.[0]) return
+    const f = e.target.files[0]
+    e.target.value = ''
+    setAttachmentUploading(true)
+    try {
+      await contractService.uploadAttachment(contract.id, f, attachmentLabel || undefined)
+      toast.success('Príloha nahratá')
+      load()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Chyba pri nahrávaní prílohy')
+    } finally { setAttachmentUploading(false) }
+  }
+
+  const handleAttachmentDelete = async (attId: number, name: string) => {
+    if (!contract || !confirm(`Zmazať prílohu "${name}"?`)) return
+    try {
+      await contractService.deleteAttachment(contract.id, attId)
+      toast.success('Príloha zmazaná')
+      load()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Chyba pri mazaní')
+    }
+  }
+
+  const handleAttachmentDownload = async (attId: number, name: string) => {
+    if (!contract) return
+    try {
+      await contractService.downloadAttachment(contract.id, attId, name)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Chyba pri sťahovaní')
+    }
+  }
+
+  const fmtFileSize = (bytes?: number | null) => {
+    if (!bytes) return ''
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  }
 
   const load = async () => {
     if (!id) return
@@ -167,10 +210,114 @@ export default function ContractDetailPage() {
             </div>
           </div>
 
+          {/* Prílohy k zmluve (Word, Excel, PDF, MSG, EML) */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title"><FileText size={15} /> Príloha PDF</h3>
-              {(user?.role === 'admin' || user?.role === 'ekonom') && (
+              <h3 className="card-title"><Paperclip size={15} /> Prílohy k zmluve</h3>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  value={attachmentLabel}
+                  onChange={e => setAttachmentLabel(e.target.value)}
+                  placeholder="Popis (napr. Zmluva o dielo)"
+                  style={{ width: 200, fontSize: 12, padding: '4px 8px' }}
+                />
+                {(user?.role === 'admin' || user?.role === 'ekonom' || user?.role === 'pripravar' || user?.role === 'foreman' || user?.role === 'director') && (
+                  <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer', margin: 0 }}>
+                    <Upload size={13} /> {attachmentUploading ? 'Nahrávam…' : 'Pridať prílohu'}
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.csv,.msg,.eml,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z,.txt,.rtf,.odt,.ods"
+                      style={{ display: 'none' }}
+                      onChange={handleAttachmentUpload}
+                      disabled={attachmentUploading}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+            <div className="card-body">
+              {(contract.attachments && contract.attachments.length > 0) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {contract.attachments.map(att => (
+                    <div key={att.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                      background: 'var(--surface)',
+                    }}>
+                      <Paperclip size={14} color="var(--text3)" style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {att.original_filename}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                          {att.label && <><strong style={{ color: 'var(--brand-red)' }}>{att.label}</strong> · </>}
+                          {fmtFileSize(att.file_size)}
+                          {att.uploader && <> · {att.uploader.full_name}</>}
+                          {' · '}{fmtDate(att.uploaded_at)}
+                        </div>
+                      </div>
+                      <button type="button" className="btn btn-ghost btn-sm"
+                        onClick={() => handleAttachmentDownload(att.id, att.original_filename)} title="Stiahnuť">
+                        <Download size={13} />
+                      </button>
+                      {(user?.role === 'admin' || user?.role === 'ekonom' || user?.role === 'pripravar') && (
+                        <button type="button" className="btn btn-ghost btn-sm"
+                          style={{ color: 'var(--brand-red)' }}
+                          onClick={() => handleAttachmentDelete(att.id, att.original_filename)} title="Zmazať">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text3)', fontSize: 13, padding: '4px 0' }}>
+                  Žiadne prílohy. Nahraj vyplnenú zmluvu o dielo (Word/PDF), emaily z Outlooku alebo iné dokumenty.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Vygenerovať zmluvu (aktivuje sa po schválení riaditeľom + prílohe so zmluvou) */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title"><Wand2 size={15} /> Vygenerovať finálnu zmluvu</h3>
+            </div>
+            <div className="card-body">
+              {(() => {
+                const directorApproved = contract.director_approved
+                const hasContractFile = (contract.attachments || []).some(a =>
+                  /\.(doc|docx|pdf)$/i.test(a.original_filename)
+                )
+                const canGenerate = directorApproved && hasContractFile
+                return (
+                  <div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!canGenerate}
+                      title={!canGenerate ? 'Najprv treba schválenie riaditeľa a priloženú podpísanú zmluvu (Word/PDF)' : 'Vygenerovať'}
+                      onClick={() => toast('Automatické generovanie zmlúv zatiaľ nie je implementované', { icon: 'ℹ️' })}
+                      style={{ opacity: canGenerate ? 1 : 0.5 }}
+                    >
+                      <Wand2 size={14} /> Vygenerovať zmluvu
+                    </button>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8, lineHeight: 1.5 }}>
+                      Aktivuje sa po:<br/>
+                      {directorApproved ? '✓' : '✗'} Schválenie riaditeľom<br/>
+                      {hasContractFile ? '✓' : '✗'} Priložená podpísaná zmluva (.doc/.docx/.pdf)
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+
+          {/* Pôvodná PDF príloha (manuálne nahratie) */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title"><FileText size={15} /> Hlavné PDF tlačivo zmluvy</h3>
+              {(user?.role === 'admin' || user?.role === 'ekonom' || user?.role === 'pripravar') && (
                 <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
                   <Upload size={14} /> Nahrať PDF
                   <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfUpload} />
@@ -183,7 +330,7 @@ export default function ContractDetailPage() {
                   <FileText size={15} /> {contract.pdf_filename || 'zmluva.pdf'}
                 </a>
               ) : (
-                <div style={{ color: 'var(--text3)', fontSize: 13 }}>Žiadne PDF priložené</div>
+                <div style={{ color: 'var(--text3)', fontSize: 13 }}>Žiadne hlavné PDF priložené</div>
               )}
             </div>
           </div>
