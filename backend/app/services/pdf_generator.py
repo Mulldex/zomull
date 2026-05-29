@@ -200,6 +200,7 @@ def generate_order_pdf(order: Order, company: Optional[CompanyInfo] = None) -> b
     sup_address = getattr(supplier, "address", None) if supplier else None
     sup_ico = getattr(supplier, "ico", None) if supplier else None
     sup_dic = getattr(supplier, "dic", None) if supplier else None
+    sup_ic_dph = getattr(supplier, "ic_dph", None) if supplier else None
     sup_email = getattr(supplier, "email", None) if supplier else None
     sup_phone = getattr(supplier, "phone", None) if supplier else None
     sup_contact = getattr(supplier, "contact_person", None) if supplier else None
@@ -233,6 +234,8 @@ def generate_order_pdf(order: Order, company: Optional[CompanyInfo] = None) -> b
         sup_block.append(Paragraph(f"IČO: {sup_ico}", S_N))
     if sup_dic:
         sup_block.append(Paragraph(f"DIČ: {sup_dic}", S_N))
+    if sup_ic_dph:
+        sup_block.append(Paragraph(f"IČ DPH: {sup_ic_dph}", S_N))
     if not sup_is_vat:
         sup_block.append(Paragraph("<i>Dodávateľ nie je platcom DPH</i>", S_SMALL))
     if sup_contact or sup_phone or sup_email:

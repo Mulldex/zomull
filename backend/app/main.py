@@ -43,6 +43,10 @@ def _run_migrations():
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS general_note TEXT",
         # Company info logo
         "ALTER TABLE company_info ADD COLUMN IF NOT EXISTS logo_path VARCHAR(500)",
+        # Suppliers — zvacsenie max dlzok poli + nove ic_dph pole (fix bug s dlhou DIC hodnotou)
+        "ALTER TABLE suppliers ALTER COLUMN ico TYPE VARCHAR(30)",
+        "ALTER TABLE suppliers ALTER COLUMN dic TYPE VARCHAR(50)",
+        "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ic_dph VARCHAR(30)",
     ]
     with engine.begin() as conn:
         for stmt in statements:

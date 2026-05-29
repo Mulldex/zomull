@@ -134,6 +134,7 @@ class SupplierCreate(BaseModel):
     name: str
     ico: Optional[str] = None
     dic: Optional[str] = None
+    ic_dph: Optional[str] = None
     address: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -146,6 +147,7 @@ class SupplierUpdate(BaseModel):
     name: Optional[str] = None
     ico: Optional[str] = None
     dic: Optional[str] = None
+    ic_dph: Optional[str] = None
     address: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -160,6 +162,7 @@ class SupplierOut(BaseModel):
     name: str
     ico: Optional[str]
     dic: Optional[str]
+    ic_dph: Optional[str] = None
     address: Optional[str]
     email: Optional[str]
     phone: Optional[str]

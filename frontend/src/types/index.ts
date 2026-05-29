@@ -33,6 +33,7 @@ export interface Supplier {
   name: string
   ico?: string
   dic?: string
+  ic_dph?: string
   address?: string
   email?: string
   phone?: string

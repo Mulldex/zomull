@@ -19,7 +19,7 @@ export default function SuppliersPage() {
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
-    name: '', ico: '', dic: '', address: '', email: '',
+    name: '', ico: '', dic: '', ic_dph: '', address: '', email: '',
     phone: '', contact_person: '', status: 'new' as SupplierStatus,
     note: '', is_vat_payer: true,
   })
@@ -39,12 +39,12 @@ export default function SuppliersPage() {
 
   const openCreate = () => {
     setEditSupplier(null)
-    setForm({ name: '', ico: '', dic: '', address: '', email: '', phone: '', contact_person: '', status: 'new', note: '', is_vat_payer: true })
+    setForm({ name: '', ico: '', dic: '', ic_dph: '', address: '', email: '', phone: '', contact_person: '', status: 'new', note: '', is_vat_payer: true })
     setShowModal(true)
   }
   const openEdit = (s: Supplier) => {
     setEditSupplier(s)
-    setForm({ name: s.name, ico: s.ico || '', dic: s.dic || '', address: s.address || '', email: s.email || '', phone: s.phone || '', contact_person: s.contact_person || '', status: s.status as SupplierStatus, note: s.note || '', is_vat_payer: s.is_vat_payer })
+    setForm({ name: s.name, ico: s.ico || '', dic: s.dic || '', ic_dph: s.ic_dph || '', address: s.address || '', email: s.email || '', phone: s.phone || '', contact_person: s.contact_person || '', status: s.status as SupplierStatus, note: s.note || '', is_vat_payer: s.is_vat_payer })
     setShowModal(true)
   }
 
@@ -159,7 +159,8 @@ export default function SuppliersPage() {
               <div className="form-group"><label className="form-label">Názov firmy *</label><input required value={form.name} onChange={set('name')} placeholder="Stavmat s.r.o." /></div>
               <div className="form-grid-2">
                 <div className="form-group"><label className="form-label">IČO</label><input value={form.ico} onChange={set('ico')} placeholder="12345678" /></div>
-                <div className="form-group"><label className="form-label">DIČ / IČ DPH</label><input value={form.dic} onChange={set('dic')} placeholder="SK2023456789" /></div>
+                <div className="form-group"><label className="form-label">DIČ</label><input value={form.dic} onChange={set('dic')} placeholder="2023456789" /></div>
+                <div className="form-group"><label className="form-label">IČ DPH</label><input value={form.ic_dph} onChange={set('ic_dph')} placeholder="SK2023456789" /></div>
               </div>
               <div className="form-group"><label className="form-label">Adresa</label><input value={form.address} onChange={set('address')} placeholder="Ulica 1, 010 01 Mesto" /></div>
               <div className="form-grid-2">

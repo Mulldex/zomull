@@ -64,8 +64,9 @@ class Supplier(Base):
 
     id             = Column(Integer, primary_key=True, index=True)
     name           = Column(String(200), nullable=False, index=True)
-    ico            = Column(String(20), nullable=True, unique=True)
-    dic            = Column(String(20), nullable=True)
+    ico            = Column(String(30), nullable=True, unique=True)
+    dic            = Column(String(50), nullable=True)
+    ic_dph         = Column(String(30), nullable=True)
     address        = Column(String(300), nullable=True)
     email          = Column(String(200), nullable=True)
     phone          = Column(String(50), nullable=True)
